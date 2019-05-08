@@ -1,0 +1,189 @@
+// Include
+#include <WiFi.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include "SSD1306.h"
+#include "PietteTech_DHT.h"
+ 
+// Defines
+#define NTP_OFFSET  25200 // in seconds
+#define NTP_INTERVAL 60 * 1000 // In Milliseconds
+#define NTP_ADDRESS "0.pool.ntp.org" // NTP service site url
+#define SDA_PIN 21 // GPIO21 -> SDA
+#define SCL_PIN 22 // GPIO22 -> SCL
+#define SSD_ADDRESS 0x3c // Display address on i2c bus
+#define DHTTYPE DHT22 // Sensor type
+#define DHTPIN 16 // Digital DPin for communication 
+ 
+const char *ssid     = " ";   //YOUR SSID
+const char *password = " ";   //YOUR PASSWORD
+String formattedTime;
+float localHum = 0;
+float localTemp = 0;
+String ipStr;
+int count = 0;
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, NTP_ADDRESS, NTP_OFFSET, NTP_INTERVAL);
+SSD1306  display(SSD_ADDRESS, SDA_PIN, SCL_PIN);
+
+void dht_wrapper();
+
+PietteTech_DHT DHT(DHTPIN, DHTTYPE, dht_wrapper);
+
+WiFiClient client;
+  
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println("");
+  Serial.println("ESP32 DHT Temp & Humidity com Time Stamp - OLED Display");
+  Serial.println("");
+ 
+  display.init();
+  display.flipScreenVertically();
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.setFont(ArialMT_Plain_10);
+ 
+  connectWiFi();
+  timeClient.begin();
+}
+ 
+void loop() {
+  count ++;
+  Serial.print("Collecting information from sensors: ");
+
+  int result = DHT.acquireAndWait(0);
+
+  switch (result) {
+    case DHTLIB_OK:
+      Serial.println("OK");
+      break;
+    case DHTLIB_ERROR_CHECKSUM:
+      Serial.println("Error\n\r\t Checksum error");
+      break;
+    case DHTLIB_ERROR_ISR_TIMEOUT:
+      Serial.println("Error\n\r\t ISR time out error");
+      break;
+    case DHTLIB_ERROR_RESPONSE_TIMEOUT:
+      Serial.println("Error\n\r\t Answer time out error");
+      break;
+    case DHTLIB_ERROR_DATA_TIMEOUT:
+      Serial.println("Error\n\r\t Data time out error");
+      break;
+    case DHTLIB_ERROR_ACQUIRING:
+      Serial.println("Error\n\r\t Aquisição");
+      break;
+    case DHTLIB_ERROR_DELTA:
+      Serial.println("Error\n\r\t Very short time variation");
+      break;
+    case DHTLIB_ERROR_NOTSTARTED:
+      Serial.println("Error\n\r\t Not started");
+      break;
+    default:
+      Serial.println("Unknown error");
+      break;
+  }
+  timeClient.update();
+  displayData();
+ 
+  if (count == 10) {
+    getDHT();
+    displayData();
+    count = 0;
+  }
+  delay(1000);
+}
+
+void dht_wrapper() {
+  DHT.isrCallback();
+}
+
+void getDHT()
+{
+  localTemp = DHT.getCelsius();
+  delay(5);
+  localHum = DHT.getHumidity();
+
+  if (isnan(localHum) || isnan(localTemp))
+  {
+    return;
+  }
+}
+
+void displayData()
+{
+  formattedTime = timeClient.getFormattedTime();
+  Serial.print(formattedTime);
+  Serial.print("  Temp: => ");
+  Serial.print(localTemp);
+  Serial.print("  Humid => ");
+  Serial.println(localHum);
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(25, 0, "T: "); //อุณหภูมิ
+  display.drawString(48, 0, String(localTemp));
+  display.drawString(95, 0, "°C");
+  display.drawString(25, 20, "H: "); //ความชื้นในอากาศ
+  display.drawString(48, 20, String(localHum));
+  display.drawString(95, 20, "%");
+ 
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(40, 40,  String(formattedTime));
+ 
+  display.setFont(ArialMT_Plain_10);
+  display.drawString(15, 50 ,  "IP: " + ipStr);
+ 
+  display.display();
+  delay(10);
+}
+
+void connectWiFi(void)
+{
+  int i;
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+ 
+  display.drawString(2, 10, "Connecting to: ");
+  display.drawString(1, 25, String(ssid));
+  display.display();
+  
+  WiFi.begin(ssid, password);
+  while ((WiFi.status() != WL_CONNECTED) && i < 100) {
+    i ++;
+    delay(500);
+    Serial.print(".");
+    display.drawString((3 + i * 2), 35, ".");
+    display.display();
+  }
+ 
+  if ( WiFi.status() == WL_CONNECTED) {
+ 
+    display.clear();
+    display.setFont(ArialMT_Plain_16);
+    display.drawString(3, 20,  "WiFi Connected!!");
+ 
+    IPAddress ip = WiFi.localIP();
+ 
+    ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
+    Serial.println("");
+    Serial.println("WiFi Connected.");
+    Serial.println("IP Address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Subnetwork: ");
+    Serial.println(WiFi.subnetMask());
+    Serial.print("Gateway: ");
+    Serial.println(WiFi.gatewayIP());
+    display.display();
+  } else {
+    display.clear();
+    display.setFont(ArialMT_Plain_16);
+    display.drawString(3, 16, "WiFi Not connected");
+    ipStr = "NOT CONNECTED";
+    Serial.println("");
+    Serial.println("WiFi Not connected.");
+    display.display();
+  }
+  delay(1000);
+}
